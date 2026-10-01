@@ -69,6 +69,18 @@ function _is_zero_impedance_arc(
     )
 end
 
+# User irreducible buses outrank system-derived ones, which outrank the rest. Only two
+# user irreducible buses block a merge; otherwise the higher-priority bus survives.
+function _zero_impedance_survival_priority(
+    bus_no::Int,
+    user_irreducible::Set{Int},
+    system_irreducible::Set{Int},
+)
+    bus_no ∈ user_irreducible && return 2
+    bus_no ∈ system_irreducible && return 1
+    return 0
+end
+
 function get_reduction(
     ybus::Ybus,
     sys::PSY.System,
@@ -77,6 +89,7 @@ function get_reduction(
     nr = NetworkReductionData()
     nrd = get_network_reduction_data(ybus)
     user_irreducible = get_user_irreducible_buses(get_reductions(nrd))
+    system_irreducible = _system_derived_irreducible_buses(sys, false)
     susceptance_threshold = get_susceptance_threshold(reduction)
     # Match the substitute reactance used for `r == x == 0` branches during assembly,
     # so a branch's merge eligibility is judged against the admittance it contributed.
@@ -91,13 +104,19 @@ function get_reduction(
             _is_zero_impedance_arc(
                 br, susceptance_threshold, min_x_eps, resistance_tolerance) || continue
             from_no, to_no = arc_key
-            from_irred = from_no ∈ user_irreducible
-            to_irred = to_no ∈ user_irreducible
-            if from_irred && to_irred
-                @warn "Zero-impedance branch between two irreducible buses $from_no and $to_no; skipping merge."
+            # Rank the cluster roots, not the endpoints: an endpoint already merged away
+            # must not drag a higher-priority cluster into a lower-priority bus.
+            from_root = get(nr.reverse_bus_search_map, from_no, from_no)
+            to_root = get(nr.reverse_bus_search_map, to_no, to_no)
+            from_priority = _zero_impedance_survival_priority(
+                from_root, user_irreducible, system_irreducible)
+            to_priority = _zero_impedance_survival_priority(
+                to_root, user_irreducible, system_irreducible)
+            if from_root != to_root && from_priority == to_priority == 2
+                @warn "Zero-impedance branch between two irreducible buses $from_root and $to_root; skipping merge."
                 continue
-            elseif to_irred
-                # Flip so the irreducible bus survives.
+            elseif to_priority > from_priority
+                # Ties keep the from-bus.
                 from_no, to_no = to_no, from_no
             end
 
