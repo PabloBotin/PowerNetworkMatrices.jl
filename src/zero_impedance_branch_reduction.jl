@@ -11,7 +11,10 @@ on it has resistance within `resistance_tolerance` (`abs(r) <= resistance_tolera
 and series admittance `abs(y) >= susceptance_threshold`, matching PSS(e). Examined
 per branch (not via the summed off-diagonal), so a zero-impedance jumper in
 parallel with a normal line still merges the buses. The from-bus survives unless
-the to-bus is in the user-supplied irreducible set, in which case the sides flip.
+the to-bus has higher priority, in which case the sides flip: user-supplied
+irreducible buses first, then system-derived ones (`TwoTerminalHVDC` terminals,
+injector hosts, cross-area and interface branch endpoints). A branch between two
+user-supplied irreducible buses is not merged.
 
 # Fields
 - `susceptance_threshold::Float64 = ZERO_IMPEDANCE_BRANCH_YBUS_SUSCEPTANCE_THRESHOLD`

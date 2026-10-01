@@ -393,6 +393,63 @@ end
     @test 113 ∈ PNM.get_bus_axis(ybus_skip)
 end
 
+@testset "ZeroImpedanceBranchReduction keeps HVDC terminal buses" begin
+    # Jumpers 2-3-4 collapse into one bus. Bus 4 is an HVDC terminal, so it must survive
+    # whichever jumper is merged first, without being listed in `irreducible_buses`.
+    sys = System(100.0)
+    buses = [
+        ACBus(;
+            number = i,
+            name = "b$i",
+            available = true,
+            bustype = i == 1 ? ACBusTypes.REF : ACBusTypes.PQ,
+            angle = 0.0,
+            magnitude = 1.0,
+            voltage_limits = (min = 0.9, max = 1.1),
+            base_voltage = 230.0,
+        ) for i in 1:4
+    ]
+    foreach(b -> add_component!(sys, b), buses)
+    for (f, t, x) in ((1, 2, 0.05), (2, 3, 1e-5), (3, 4, 1e-5))
+        arc = Arc(; from = buses[f], to = buses[t])
+        add_component!(sys, arc)
+        add_component!(
+            sys,
+            Line(;
+                name = "L$f$t",
+                available = true,
+                active_power_flow = 0.0,
+                reactive_power_flow = 0.0,
+                arc = arc,
+                r = 0.0,
+                x = x,
+                b = (from = 0.0, to = 0.0),
+                rating = 1.0,
+                angle_limits = (min = -1.5, max = 1.5),
+            ),
+        )
+    end
+    arc = Arc(; from = buses[1], to = buses[4])
+    add_component!(sys, arc)
+    add_component!(
+        sys,
+        TwoTerminalGenericHVDCLine(;
+            name = "DC_1_4",
+            available = true,
+            active_power_flow = 0.0,
+            arc = arc,
+            active_power_limits_from = (min = -1.0, max = 1.0),
+            active_power_limits_to = (min = -1.0, max = 1.0),
+            reactive_power_limits_from = (min = 0.0, max = 0.0),
+            reactive_power_limits_to = (min = 0.0, max = 0.0),
+        ),
+    )
+
+    ybus = Ybus(sys)
+    @test PNM.get_bus_reduction_map(ybus.network_reduction_data)[4] == Set([2, 3])
+    @test PNM.get_bus_axis(ybus) == [1, 4]
+end
+
 @testset "ZeroImpedanceBranchReduction: custom susceptance_threshold" begin
     # Line3 (bus 2 → 3) gets r=0 and a reactance giving |imag(Y)| ≈ 1e3, below the
     # default 1e4 threshold, so it is NOT merged by default. A custom, lower threshold
